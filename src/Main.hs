@@ -35,10 +35,15 @@ shuffle gen list = randomElem : shuffle newGen newList
     randomElem = list !! randomIndex
     newList = take randomIndex list ++ drop (randomIndex + 1) list
 
--- TODO: different sizes and difficulties
-genBoard :: StdGen -> Board
-genBoard g = mapCells $ mapRows finalRow
+genBoard :: StdGen -> Int -> Board
+genBoard g s = mapCells $ mapRows finalRow
   where
+    -- TODO: board size
+    size = case s of
+          1 -> 4
+          2 -> 9
+          3 -> 16
+
     row = [1 .. 9]
     mapCells = fmap (fmap Just)
     mapRows = fromList . map fromList
@@ -65,11 +70,12 @@ genBoard g = mapCells $ mapRows finalRow
     colResult = colSh1 ++ colSh2 ++ colSh3
     rowResult = rowSh1 ++ rowSh2 ++ rowSh3
 
-    finalCol = foldr (\i s -> foldr (\j s' -> (renewRow !! i) !! (colResult !! j) : s') [] [0 .. 8] : s) [] [0 .. 8]
-    finalRow = foldr (\i s -> foldr (\j s' -> (finalCol !! i) !! (rowResult !! j) : s') [] [0 .. 8] : s) [] [0 .. 8]
+    finalCol = fold9 (\i s -> fold9 (\j s' -> (renewRow !! i) !! (colResult !! j) : s') : s)
+    finalRow = fold9 (\i s -> fold9 (\j s' -> (finalCol !! i) !! (rowResult !! j) : s') : s)
+    fold9 f = foldr f [] [0 .. 8]
 
-maskBoard :: StdGen -> Board -> Board
-maskBoard g b = foldr (\x b' -> setCell Nothing x b') b (take 60 $ randomRs ((0, 0), (8, 8)) g)
+maskBoard :: StdGen -> Int -> Board -> Board
+maskBoard g d b = foldr (\x b' -> setCell Nothing x b') b (take (30 * d) $ randomRs ((0, 0), (8, 8)) g)
 
 setCell :: a -> Pos -> Seq (Seq a) -> Seq (Seq a)
 setCell c = mapCell (const c)
@@ -156,8 +162,25 @@ handleInput _ _ 'q' = exitSuccess
 handleInput b p 'x' = loopedyLoop (setCell Nothing p b) p
 handleInput b p i
   | i `elem` ['h', 'j', 'k', 'l'] = loopedyLoop b (move p i)
-  | isDigit i = loopedyLoop (setCell (Just $ digitToInt i) p b) p
+  | isDigit i && i /= '0' = loopedyLoop (setCell (Just $ digitToInt i) p b) p
 handleInput b p _ = loopedyLoop b p
+
+beginGame :: IO ()
+beginGame = do
+  gen <- newStdGen
+  putStrLn "Choose difficulty (1,2,3) "
+  d <- getValidChar
+  {-
+  putStrLn "Choose size (1,2,3) "
+  s <- getValidChar
+  -}
+  loopedyLoop (maskBoard gen (digitToInt d) $ genBoard gen 2 {-(digitToInt s)-}) (0, 0)
+  where
+    getValidChar = do
+      d <- getChar
+      if d `elem` ['1', '2', '3']
+        then return d
+        else getValidChar
 
 endGame :: Board -> Pos -> IO ()
 endGame b p = do
@@ -171,11 +194,8 @@ endGame b p = do
           putStrLn "Start new game? (Y/n)"
           input <- getChar
           if input == 'n'
-            then 
-              exitSuccess
-            else do
-              gen <- newStdGen
-              loopedyLoop (maskBoard gen $ genBoard gen) (0, 0)
+            then exitSuccess
+            else beginGame
         else
           putStrLn "Incorrect... :("
     else
@@ -196,5 +216,5 @@ loopedyLoop b p = do
 
 main = do
   hSetBuffering stdin NoBuffering
-  gen <- newStdGen
-  loopedyLoop (maskBoard gen $ genBoard gen) (0, 0)
+  beginGame
+
