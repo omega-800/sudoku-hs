@@ -1,0 +1,9 @@
+dependencies:
+  - base >= 4.13 && < 5
+  - random >= 1.2.1
+  - containers >= 0.7
+  - Cabal-syntax >= 3.12.1.0
+executables:
+  sudoku-hs:
+    source-dirs: src
+    main: Main.hs
