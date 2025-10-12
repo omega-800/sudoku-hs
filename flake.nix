@@ -80,7 +80,7 @@
         {
           default = {
             type = "app";
-            program = "${self.packages.${pkgs.system}.default}/src/sudoku-hs";
+            program = "${self.packages.${pkgs.system}.default}/bin/sudoku-hs";
           };
         }
       );

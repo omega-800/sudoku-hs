@@ -1,15 +1,15 @@
 import Control.Monad (join)
-import Data.Char (isDigit, digitToInt)
+import Data.Char (digitToInt, isDigit)
 import Data.List (intercalate)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.Sequence (Seq, empty, fromList, singleton, update, (!?), (<|), (><), (|>))
 import qualified Data.Sequence as Sequence
-import Distribution.Compat.Prelude (exitSuccess, fromMaybe)
 import GHC.IO.Handle (hSetBuffering)
 import GHC.IO.Handle.FD (stdin)
 import GHC.IO.Handle.Types (BufferMode (NoBuffering))
-import System.Random (StdGen, newStdGen)
-import System.Random.Stateful (Random(randoms))
+import System.Exit (exitSuccess)
+import System.Random (Random (randomR, randomRs), StdGen, newStdGen)
+import System.Random.Stateful (Random (randoms))
 
 type Cell = Maybe Int
 
@@ -25,18 +25,23 @@ shift i s = Sequence.drop i s >< Sequence.take i s
 shift' :: Int -> [a] -> [a]
 shift' i s = drop i s ++ take i s
 
-shuffle' :: [Int] -> [a] -> [a]
-shuffle' (i:is) xs = let (firsts, rest) = splitAt (i `mod` length xs) xs
-                     in (head rest) : shuffle' is (firsts ++ tail rest)
 shuffle :: StdGen -> [a] -> [a]
-shuffle g xs = shuffle' (randoms g) xs
+shuffle gen [] = []
+shuffle gen list = randomElem : shuffle newGen newList
+  where
+    randomTuple = randomR (0, (length list) - 1) gen
+    randomIndex = fst randomTuple
+    newGen = snd randomTuple
+    randomElem = list !! randomIndex
+    newList = take randomIndex list ++ drop (randomIndex + 1) list
 
 -- TODO: different sizes and difficulties
 genBoard :: StdGen -> Board
-genBoard g ={- mapCells (fromList (map fromList finalRow))
-   where 
+genBoard g = mapCells $ mapRows finalRow
+  where
     row = [1 .. 9]
-    mapCells = fmap (fmap Just) 
+    mapCells = fmap (fmap Just)
+    mapRows = fromList . map fromList
 
     row1 = shuffle g row
     row2 = shift' 3 row1
@@ -48,33 +53,23 @@ genBoard g ={- mapCells (fromList (map fromList finalRow))
     row8 = shift' 3 row7
     row9 = shift' 3 row8
 
-    renewRow = [row1,row2,row3,row4,row5,row6,row7,row8,row9]
+    renewRow = [row1, row2, row3, row4, row5, row6, row7, row8, row9]
 
-    colSh1 = shuffle g [0,1,2]
-    colSh2 = shuffle g [3,4,5]
-    colSh3 = shuffle g [6,7,8]
-    rowSh1 = shuffle g [0,1,2]
-    rowSh2 = shuffle g [3,4,5]
-    rowSh3 = shuffle g [6,7,8]
+    colSh1 = shuffle g [0, 1, 2]
+    colSh2 = shuffle g [3, 4, 5]
+    colSh3 = shuffle g [6, 7, 8]
+    rowSh1 = shuffle g [0, 1, 2]
+    rowSh2 = shuffle g [3, 4, 5]
+    rowSh3 = shuffle g [6, 7, 8]
 
     colResult = colSh1 ++ colSh2 ++ colSh3
     rowResult = rowSh1 ++ rowSh2 ++ rowSh3
 
-    finalCol = foldr (\i s -> foldr (\j s' -> (renewRow!!i)!!(colResult!!j)  : s') [] [0..8] : s) [] [0..8]
-    finalRow = foldr (\i s -> foldr (\j s' -> (finalCol!!i)!!(rowResult!!j)  : s') [] [0..8] : s) [] [0..8]
+    finalCol = foldr (\i s -> foldr (\j s' -> (renewRow !! i) !! (colResult !! j) : s') [] [0 .. 8] : s) [] [0 .. 8]
+    finalRow = foldr (\i s -> foldr (\j s' -> (finalCol !! i) !! (rowResult !! j) : s') [] [0 .. 8] : s) [] [0 .. 8]
 
--}
-  fromList
-    [ fromList [Just 2, Just 3, Just 1, Just 4, Just 5, Just 6, Just 7, Just 8, Nothing],
-      fromList [Just 3, Just 4, Just 2, Just 5, Just 6, Just 7, Just 8, Just 9, Just 1],
-      fromList [Just 4, Just 5, Just 3, Just 6, Just 7, Just 8, Just 9, Just 1, Just 2],
-      fromList [Just 5, Just 6, Just 4, Just 7, Just 8, Just 9, Just 1, Just 2, Just 3],
-      fromList [Just 6, Just 7, Just 5, Just 8, Just 9, Just 1, Just 2, Just 3, Just 4],
-      fromList [Just 7, Just 8, Just 6, Just 9, Just 1, Just 2, Just 3, Just 4, Just 5],
-      fromList [Just 8, Just 9, Just 7, Just 1, Just 2, Just 3, Just 4, Just 5, Just 6],
-      fromList [Just 9, Just 1, Just 8, Just 2, Just 3, Just 4, Just 5, Just 6, Just 7],
-      fromList [Just 1, Just 2, Just 9, Just 3, Just 4, Just 5, Just 6, Just 7, Just 8]
-    ]
+maskBoard :: StdGen -> Board -> Board
+maskBoard g b = foldr (\x b' -> setCell Nothing x b') b (take 60 $ randomRs ((0, 0), (8, 8)) g)
 
 setCell :: a -> Pos -> Seq (Seq a) -> Seq (Seq a)
 setCell c = mapCell (const c)
@@ -157,41 +152,49 @@ validate b = all validateRow b && all validateRow cols && validateGroups b
   where
     cols = switcheroo b
 
+handleInput _ _ 'q' = exitSuccess
+handleInput b p 'x' = loopedyLoop (setCell Nothing p b) p
+handleInput b p i
+  | i `elem` ['h', 'j', 'k', 'l'] = loopedyLoop b (move p i)
+  | isDigit i = loopedyLoop (setCell (Just $ digitToInt i) p b) p
+handleInput b p _ = loopedyLoop b p
+
 endGame :: Board -> Pos -> IO ()
 endGame b p = do
-  putStrLn "Finished! check? (y/n)"
+  putStrLn "Finished! check? (y)"
   input <- getChar
   if input == 'y'
-    then
+    then do
       if validate b
-        then
+        then do
           putStrLn "Correct! :)"
+          putStrLn "Start new game? (Y/n)"
+          input <- getChar
+          if input == 'n'
+            then 
+              exitSuccess
+            else do
+              gen <- newStdGen
+              loopedyLoop (maskBoard gen $ genBoard gen) (0, 0)
         else
           putStrLn "Incorrect... :("
     else
-      loopedyLoop b p
+      handleInput b p input
   exitSuccess
 
 loopedyLoop :: Board -> Pos -> IO ()
 loopedyLoop b p = do
   putStrLn "\ESC[2J"
-  mapM_ putStrLn ["h,j,k,l to move", "1,2,3,4,5,6,7,8,9 to set number", "x to clear cell", "q to quit", "position: " ++ show p]
+  mapM_ putStrLn ["h,j,k,l to move", "1,2,3,4,5,6,7,8,9 to set number", "x to clear cell", "q to quit", "position: " ++ show p, ""]
   printBoard p b
   if isFull b
     then
       endGame b p
     else do
       input <- getChar
-      handleInput input
-  where
-    handleInput 'q' = exitSuccess
-    handleInput 'x' = loopedyLoop (setCell Nothing p b) p
-    handleInput i
-      | i `elem` ['h', 'j', 'k', 'l'] = loopedyLoop b (move p i)
-      | isDigit i = loopedyLoop (setCell (Just (digitToInt i)) p b) p
-    handleInput _ = loopedyLoop b p
+      handleInput b p input
 
 main = do
   hSetBuffering stdin NoBuffering
   gen <- newStdGen
-  loopedyLoop (genBoard gen) (0, 0)
+  loopedyLoop (maskBoard gen $ genBoard gen) (0, 0)

@@ -3,3 +3,4 @@
 sudoku-hs.cabal
 dist-newstyle
 src/Main
+result
