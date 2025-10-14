@@ -35,47 +35,38 @@ shuffle gen list = randomElem : shuffle newGen newList
     randomElem = list !! randomIndex
     newList = take randomIndex list ++ drop (randomIndex + 1) list
 
+szg :: Foldable a => a b -> Int
+szg = floor . sqrt . fromIntegral . length
+
+splits :: [a] -> [[a]]
+splits [] = []
+splits r = spl grSize r
+  where
+    grSize = szg r
+    spl _ [] = []
+    spl n r' = take n r' : spl n (drop n r')
+
 genBoard :: StdGen -> Int -> Board
 genBoard g s = mapCells $ mapRows finalRow
   where
-    -- TODO: board size
     size = case s of
-          1 -> 4
-          2 -> 9
-          3 -> 16
-
-    row = [1 .. 9]
+      1 -> 4
+      2 -> 9
+      3 -> 16
+    grSize = floor $ sqrt $ fromIntegral size
     mapCells = fmap (fmap Just)
     mapRows = fromList . map fromList
-
-    row1 = shuffle g row
-    row2 = shift' 3 row1
-    row3 = shift' 3 row2
-    row4 = shift' 1 row3
-    row5 = shift' 3 row4
-    row6 = shift' 3 row5
-    row7 = shift' 1 row6
-    row8 = shift' 3 row7
-    row9 = shift' 3 row8
-
-    renewRow = [row1, row2, row3, row4, row5, row6, row7, row8, row9]
-
-    colSh1 = shuffle g [0, 1, 2]
-    colSh2 = shuffle g [3, 4, 5]
-    colSh3 = shuffle g [6, 7, 8]
-    rowSh1 = shuffle g [0, 1, 2]
-    rowSh2 = shuffle g [3, 4, 5]
-    rowSh3 = shuffle g [6, 7, 8]
-
-    colResult = colSh1 ++ colSh2 ++ colSh3
-    rowResult = rowSh1 ++ rowSh2 ++ rowSh3
-
-    finalCol = fold9 (\i s -> fold9 (\j s' -> (renewRow !! i) !! (colResult !! j) : s') : s)
-    finalRow = fold9 (\i s -> fold9 (\j s' -> (finalCol !! i) !! (rowResult !! j) : s') : s)
-    fold9 f = foldr f [] [0 .. 8]
+    shiftNrForPos i = (grSize * i - (grSize - 1) * floor ((fromIntegral i) / (fromIntegral grSize))) `mod` size
+    renewRow = foldr (\(i, el) res -> (shift' (shiftNrForPos i) el) : res) [] (zip [0 .. size - 1] $ replicate size (shuffle g [1..size]))
+    sflRow = concat $ map (shuffle g) (splits [0..(size-1)])
+    finalCol = foldn (\i s -> foldn (\j s' -> (renewRow !! i) !! (sflRow !! j) : s') : s)
+    finalRow = foldn (\i s -> foldn (\j s' -> (finalCol !! i) !! (sflRow !! j) : s') : s)
+    foldn f = foldr f [] [0 .. (size - 1)]
 
 maskBoard :: StdGen -> Int -> Board -> Board
-maskBoard g d b = foldr (\x b' -> setCell Nothing x b') b (take (30 * d) $ randomRs ((0, 0), (8, 8)) g)
+maskBoard g d b = foldr (\x b' -> setCell Nothing x b') b (take (((szg b) ^ 2) * d) $ randomRs ((0, 0), (size - 1, size - 1)) g)
+  where
+    size = length b
 
 setCell :: a -> Pos -> Seq (Seq a) -> Seq (Seq a)
 setCell c = mapCell (const c)
@@ -88,15 +79,19 @@ mapCell f p b = update y (update x (f cell) row) b
     row = fromMaybe empty (b !? y)
     cell = fromJust (row !? x) -- yes yes very good practice
 
-split3 :: Seq a -> Seq (Seq a)
-split3 Sequence.Empty = empty
-split3 r = Sequence.take 3 r <| split3 (Sequence.drop 3 r)
+splitg :: Seq a -> Seq (Seq a)
+splitg Sequence.Empty = empty
+splitg r = spl grSize r
+  where
+    grSize = szg r
+    spl _ Sequence.Empty = empty
+    spl n r' = Sequence.take n r' <| spl n (Sequence.drop n r')
 
 intercal :: Seq a -> Seq (Seq a) -> Seq a
 intercal s ss = join (Sequence.intersperse s ss)
 
 interPipe :: Seq String -> Seq String
-interPipe = intercal (singleton "|") . split3
+interPipe = intercal (singleton "|") . splitg
 
 pad :: String -> String
 pad s = " " ++ s ++ " "
@@ -105,7 +100,7 @@ boardToStr :: Board -> BoardStr
 boardToStr = fmap (pad . maybe "_" show <$>) -- mmh i love destroying readability
 
 interGrid :: BoardStr -> BoardStr
-interGrid = intercal (singleton $ interPipe $ Sequence.replicate 9 "___") . split3 . fmap interPipe
+interGrid b = intercal (singleton $ interPipe $ Sequence.replicate (length b) "___") (splitg $ fmap interPipe b)
 
 setPosStr :: Pos -> BoardStr -> BoardStr
 setPosStr = mapCell (map repl)
@@ -116,42 +111,47 @@ setPosStr = mapCell (map repl)
 printBoard :: Pos -> Board -> IO ()
 printBoard p b = mapM_ (putStrLn . concat) $ interGrid $ setPosStr p $ boardToStr b
 
-move :: Pos -> Char -> Pos
-move (0, y) 'h' = (8, y)
-move (x, y) 'h' = (x - 1, y)
-move (x, 8) 'j' = (x, 0)
-move (x, y) 'j' = (x, y + 1)
-move (x, 0) 'k' = (x, 8)
-move (x, y) 'k' = (x, y - 1)
-move (8, y) 'l' = (0, y)
-move (x, y) 'l' = (x + 1, y)
+move :: Board -> Pos -> Char -> Pos
+move b (x, y) c
+  | c == 'h' && x == 0 = (maxSize, y)
+  | c == 'h' = (x - 1, y)
+  | c == 'j' && y == maxSize = (x, 0)
+  | c == 'j' = (x, y + 1)
+  | c == 'k' && y == 0 = (x, maxSize)
+  | c == 'k' = (x, y - 1)
+  | c == 'l' && x == maxSize = (0, y)
+  | c == 'l' = (x + 1, y)
+  where
+    maxSize = (length b) - 1
 
 isFull :: Board -> Bool
 isFull = all (notElem Nothing)
 
 validateRow :: Seq Cell -> Bool
-validateRow r = all (\n -> 0 < n && n < 10) nums && (sum nums == 45)
+validateRow r = all (\n -> 0 < n && n <= size) nums && (sum nums == sum [1 .. size])
   where
     nums = fromMaybe (-1) <$> r
+    size = length r
 
 cellAt :: Int -> Int -> Board -> Cell
 cellAt x y b = num (lst (b !? y) !? x)
   where
-    num = fromMaybe (Just (-1))
+    num = fromMaybe $ Just (-1)
     lst = fromMaybe empty
 
 cellsFromTo :: Pos -> Pos -> Board -> Seq Cell
 cellsFromTo f t b = foldr (\x s -> foldr (\y s' -> cellAt x y b <| s') s [(snd f) .. (snd t)]) empty [(fst f) .. (fst t)]
 
 validateGroups :: Board -> Bool
-validateGroups b = all3 (\i -> all3 (\j -> validateRow (cellsFromTo (i * 3, j * 3) (i * 3 + 2, j * 3 + 2) b)))
+validateGroups b = all3 (\i -> all3 (\j -> validateRow (cellsFromTo (i * grSize, j * grSize) ((i + 1) * grSize - 1, (j + 1) * grSize - 1) b)))
   where
-    all3 f = all f [0 .. 2]
+    all3 f = all f [0 .. (grSize - 1)]
+    grSize = szg b
 
 switcheroo :: Board -> Board
 switcheroo b = fold9 (\x s -> fold9 (\y col -> cellAt y x b <| col) <| s)
   where
-    fold9 f = foldr f empty [0 .. 8]
+    fold9 f = foldr f empty [0 .. ((length b) - 1)]
 
 validate :: Board -> Bool
 validate b = all validateRow b && all validateRow cols && validateGroups b
@@ -161,7 +161,7 @@ validate b = all validateRow b && all validateRow cols && validateGroups b
 handleInput _ _ 'q' = exitSuccess
 handleInput b p 'x' = loopedyLoop (setCell Nothing p b) p
 handleInput b p i
-  | i `elem` ['h', 'j', 'k', 'l'] = loopedyLoop b (move p i)
+  | i `elem` ['h', 'j', 'k', 'l'] = loopedyLoop b (move b p i)
   | isDigit i && i /= '0' = loopedyLoop (setCell (Just $ digitToInt i) p b) p
 handleInput b p _ = loopedyLoop b p
 
@@ -169,18 +169,16 @@ beginGame :: IO ()
 beginGame = do
   gen <- newStdGen
   putStrLn "Choose difficulty (1,2,3) "
-  d <- getValidChar
-  {-
-  putStrLn "Choose size (1,2,3) "
-  s <- getValidChar
-  -}
-  loopedyLoop (maskBoard gen (digitToInt d) $ genBoard gen 2 {-(digitToInt s)-}) (0, 0)
+  d <- (getValidChar ['1', '2', '3'])
+  putStrLn "Choose size (1,2) "
+  s <- (getValidChar ['1', '2'])
+  loopedyLoop (maskBoard gen (digitToInt d) $ genBoard gen (digitToInt s)) (0, 0)
   where
-    getValidChar = do
+    getValidChar valid = do
       d <- getChar
-      if d `elem` ['1', '2', '3']
+      if d `elem` valid
         then return d
-        else getValidChar
+        else getValidChar valid
 
 endGame :: Board -> Pos -> IO ()
 endGame b p = do
@@ -217,4 +215,3 @@ loopedyLoop b p = do
 main = do
   hSetBuffering stdin NoBuffering
   beginGame
-
