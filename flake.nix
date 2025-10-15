@@ -1,31 +1,23 @@
 {
-  description = "A Nix-flake-based Haskell development environment";
+  description = "sudoku-hs";
 
-  inputs.nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1"; # unstable Nixpkgs
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable"; 
 
   outputs =
-    { self, ... }@inputs:
-
+    { self, nixpkgs }:
     let
-      supportedSystems = [
+      systems = [
         "x86_64-linux"
         "aarch64-linux"
         "x86_64-darwin"
         "aarch64-darwin"
       ];
-      forEachSupportedSystem =
-        f:
-        inputs.nixpkgs.lib.genAttrs supportedSystems (
-          system:
-          f {
-            pkgs = import inputs.nixpkgs { inherit system; };
-          }
-        );
-
+      eachSystem =
+        f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs { inherit system; }));
     in
     {
-      devShells = forEachSupportedSystem (
-        { pkgs }:
+      devShells = eachSystem (
+        pkgs:
         let
           stack-wrapped = pkgs.symlinkJoin {
             name = "stack";
@@ -41,9 +33,6 @@
                 "
             '';
           };
-        in
-        {
-          default = pkgs.mkShellNoCC rec {
             buildInputs = with pkgs; [
               ghcid
               stack-wrapped
@@ -52,37 +41,45 @@
                   haskell-language-server
                 ]
               ))
-              haskellPackages.random
             ];
+        in
+        {
+          default = pkgs.mkShellNoCC {
+            inherit buildInputs;
             NIX_PATH = "nixpkgs=" + pkgs.path;
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
+            #LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
           };
         }
       );
 
-      packages = forEachSupportedSystem (
-        { pkgs }:
+      packages = eachSystem (
+        pkgs:
+        let
+          fs = pkgs.lib.fileset;
+        in
         {
           default = pkgs.haskell.lib.buildStackProject {
             inherit (pkgs) ghc;
             name = "sudoku-hs";
-            src = ./.;
-            buildInputs = with pkgs; [
-              zlib
-              haskellPackages.random
-            ];
+            src = fs.toSource {
+              root = ./.;
+              fileset = fs.unions [
+                ./src/Main.hs
+                ./stack.yaml
+                ./stack.yaml.lock
+                ./package.yaml
+              ];
+            };
+            # buildInputs = with pkgs; [ haskellPackages.random ];
           };
         }
       );
 
-      apps = forEachSupportedSystem (
-        { pkgs }:
-        {
-          default = {
-            type = "app";
-            program = "${self.packages.${pkgs.system}.default}/bin/sudoku-hs";
-          };
-        }
-      );
+      apps = eachSystem (pkgs: {
+        default = {
+          type = "app";
+          program = "${self.packages.${pkgs.system}.default}/bin/sudoku-hs";
+        };
+      });
     };
 }
