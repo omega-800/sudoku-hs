@@ -27,13 +27,11 @@ shift' i s = drop i s ++ take i s
 
 shuffle :: StdGen -> [a] -> [a]
 shuffle gen [] = []
-shuffle gen list = randomElem : shuffle newGen newList
+shuffle gen list = elem : shuffle newGen newList
   where
-    randomTuple = randomR (0, (length list) - 1) gen
-    randomIndex = fst randomTuple
-    newGen = snd randomTuple
-    randomElem = list !! randomIndex
-    newList = take randomIndex list ++ drop (randomIndex + 1) list
+    (idx, newGen) = randomR (0, (length list) - 1) gen
+    elem = list !! idx
+    newList = take idx list ++ drop (idx + 1) list
 
 szg :: Foldable a => a b -> Int
 szg = floor . sqrt . fromIntegral . length
@@ -58,10 +56,10 @@ genBoard g s = mapCells $ mapRows finalRow
     mapRows = fromList . map fromList
     shiftNrForPos i = (grSize * i - (grSize - 1) * floor ((fromIntegral i) / (fromIntegral grSize))) `mod` size
     renewRow = foldr (\(i, el) res -> (shift' (shiftNrForPos i) el) : res) [] (zip [0 .. size - 1] $ replicate size (shuffle g [1..size]))
-    sflRow = concat $ map (shuffle g) (splits [0..(size-1)])
-    finalCol = foldn (\i s -> foldn (\j s' -> (renewRow !! i) !! (sflRow !! j) : s') : s)
-    finalRow = foldn (\i s -> foldn (\j s' -> (finalCol !! i) !! (sflRow !! j) : s') : s)
-    foldn f = foldr f [] [0 .. (size - 1)]
+    sflRow = concat $ map (shuffle g) (splits [0 .. size - 1])
+    finalRow = gen $ gen renewRow
+    gen x = foldn (\i s -> foldn (\j s' -> (x !! i) !! (sflRow !! j) : s') : s)
+    foldn f = foldr f [] [0 .. size - 1]
 
 maskBoard :: StdGen -> Int -> Board -> Board
 maskBoard g d b = foldr (\x b' -> setCell Nothing x b') b (take (((szg b) ^ 2) * d) $ randomRs ((0, 0), (size - 1, size - 1)) g)
@@ -72,10 +70,8 @@ setCell :: a -> Pos -> Seq (Seq a) -> Seq (Seq a)
 setCell c = mapCell (const c)
 
 mapCell :: (a -> a) -> Pos -> Seq (Seq a) -> Seq (Seq a)
-mapCell f p b = update y (update x (f cell) row) b
+mapCell f (x, y) b = update y (update x (f cell) row) b
   where
-    x = fst p
-    y = snd p
     row = fromMaybe empty (b !? y)
     cell = fromJust (row !? x) -- yes yes very good practice
 
@@ -140,13 +136,14 @@ cellAt x y b = num (lst (b !? y) !? x)
     lst = fromMaybe empty
 
 cellsFromTo :: Pos -> Pos -> Board -> Seq Cell
-cellsFromTo f t b = foldr (\x s -> foldr (\y s' -> cellAt x y b <| s') s [(snd f) .. (snd t)]) empty [(fst f) .. (fst t)]
+cellsFromTo (fx,fy) (tx,ty) b = foldr (\x s -> foldr (\y s' -> cellAt x y b <| s') s [fy .. ty]) empty [fx .. tx]
 
 validateGroups :: Board -> Bool
-validateGroups b = all3 (\i -> all3 (\j -> validateRow (cellsFromTo (i * grSize, j * grSize) ((i + 1) * grSize - 1, (j + 1) * grSize - 1) b)))
+validateGroups b = all3 (\i -> all3 (\j -> validateRow $ square (i,j) b))
   where
     all3 f = all f [0 .. (grSize - 1)]
     grSize = szg b
+    square (x,y) = cellsFromTo (x * grSize, y * grSize) ((x + 1) * grSize - 1, (y + 1) * grSize - 1)
 
 switcheroo :: Board -> Board
 switcheroo b = fold9 (\x s -> fold9 (\y col -> cellAt y x b <| col) <| s)
